@@ -25,7 +25,6 @@ def generate_inputs(player_i,pieces,active_player_mask, dice_roll:int):
     
     for idx,player in enumerate(opponent_players):
         for distances in player:
-            print(distances)
             if distances == dice_roll:
                 i_1[idx] = 1  
         
@@ -77,7 +76,7 @@ def generate_inputs(player_i,pieces,active_player_mask, dice_roll:int):
     # input 8: normalized distance to goal
     i_8 = goal_position/59
 
-    I = i_0,i_1,i_2,i_3,i_4,i_5,i_6,i_7,i_8
+    I = np.vstack((i_0,i_1,i_2,i_3,i_4,i_5,i_6,i_7,i_8))
     return I
 
 def __get_diff_position(player_i,pieces,mask):

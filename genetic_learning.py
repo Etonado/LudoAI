@@ -14,7 +14,7 @@ class GeneticPlayer:
 
     global GENE_LENGTH
 
-    def __init__(self,population_size = 100, fitness_loops = 20, mutation_rate = 0.05, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
+    def __init__(self,population_size = 100, fitness_loops = 100, mutation_rate = 0.05, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
         self.variants = []
         self.population_size = population_size
         self.mutation_rate = mutation_rate
@@ -25,22 +25,18 @@ class GeneticPlayer:
         self.fitness_loops = fitness_loops
         self.game = ludopy.Game()
         self.__generate_initial_population()
-        self.__calculate_fitness()
-        self.__sort_population()
+
     
     def __generate_initial_population(self):
         for i in range(self.population_size):
-            self.variants.append(Chromosome(np.random.randint(0, 1, size=GENE_LENGTH)))
-
-    def __calculate_fitness(self):
-        for variant in self.variants:
-            pass
+            self.variants.append(Chromosome(np.random.randint(0, 2, size=GENE_LENGTH)))
 
     def __sort_population(self):
         self.variants.sort(key=lambda x: x.fitness, reverse=True)
 
     def __compute_fitness(self,players="random"):
         # fitness for all chromosomes in the current generation
+        max_fitness = 0
         for chromosome in self.variants:
             # every chromosome is tested for fitness_loops times
             weights = chromosome.decrypt_chromosome()
@@ -53,6 +49,10 @@ class GeneticPlayer:
                 # play the game until there is a winner
                 while not there_is_a_winner:
                     # one game is played
+                    # reset the piece to move
+                    player_with_highest_activation = -1
+                    highest_activation = -100
+                    # get the current state of the game
                     (dice, move_pieces, _, _, _, there_is_a_winner), player_i = self.game.get_observation()
                     # player to be trained
                     if player_i == 0:
@@ -65,11 +65,21 @@ class GeneticPlayer:
                             pieces = self.game.get_pieces()
                             # generate input matrix from the current state
                             I = input_generator.generate_inputs(player_i,pieces,mask,dice)
-
-                            activation = self.__run_neural_networks(I,weights)
+                            for idx,pieces in enumerate(move_pieces):
+                                input = I[:,pieces]
+                                activation = self.__run_neural_networks(input,weights)
+                                if activation > highest_activation:
+                                    highest_activation = activation
+                                    player_with_highest_activation = idx
 
                             #piece_to_move = function call
-                            piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))] # to be replaced by function call
+                            if player_with_highest_activation == -1:
+                                # something went wrong
+                                print("Something went wrong with the neural network")
+                                piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))]
+                            else:
+                                # move the piece with the highest activation
+                                piece_to_move = move_pieces[player_with_highest_activation] 
 
                         elif len(move_pieces) == 1: # there is no choice for moving a piece
                             piece_to_move = move_pieces[0]
@@ -85,24 +95,51 @@ class GeneticPlayer:
                     else:
                         raise Exception("Invalid player type")
 
-
+                    # get response from the game
                     _, _, _, _, _, there_is_a_winner = self.game.answer_observation(piece_to_move)
 
                 if player_i == 0:
                     winning_count += 1
-                print("Player: ", player_i," won")
+                #print("Player: ", player_i," won")
             
         
             # fitness_loop amount of games have been played
             chromosome.fitness = winning_count/self.fitness_loops
+            if chromosome.fitness > max_fitness:
+                max_fitness = chromosome.fitness
+            print("Fitness: ", chromosome.fitness," Generation: ", self.generation, " Max fitness: ",max_fitness)
 
 
 
-    def __run_neural_networks(input_matrix,weights,activation_function = "ReLU"):
-        global NUMBER_OF_HIDDEN_NEURONS
-        pass
+    def __run_neural_networks(self,input_matrix,weights,activation_function = "ReLU"):
+        global NUMBER_OF_HIDDEN_NEURONS, NUMBER_OF_INPUTS
+
+        # reshape the input matrix to a 1 x Inputs matrix
+        input_matrix = np.reshape(input_matrix,(1,NUMBER_OF_INPUTS))
+        # reshape the weights to a Inputs x Neurons matrix
+        input_weights = np.reshape(weights[0:(NUMBER_OF_HIDDEN_NEURONS*NUMBER_OF_INPUTS)],(NUMBER_OF_INPUTS,NUMBER_OF_HIDDEN_NEURONS))
+        # reshape the weights to a Neurons x 1 matrix
+        hidden_weights = np.reshape(weights[NUMBER_OF_HIDDEN_NEURONS*NUMBER_OF_INPUTS:],(NUMBER_OF_HIDDEN_NEURONS,1))
+
+        # calculate the activation of the hidden layer
+        hidden_activation = np.matmul(input_matrix,input_weights)
+        # apply the activation function
+        if activation_function == "ReLU":
+            hidden_activation = np.maximum(hidden_activation,0)
+        elif activation_function == "sigmoid":
+            hidden_activation = 1/(1+np.exp(-hidden_activation))
+        else:
+            raise Exception("Invalid activation function")
+            
         
-    def __selcect_parents(self):
+        # calculate the output
+        output = np.matmul(hidden_activation,hidden_weights)
+
+        return output
+
+    
+        
+    def __select_parents(self):
         if self.selection_type == "tournament":
             return self.__tournament_selection()
         else:
