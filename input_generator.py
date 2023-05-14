@@ -2,7 +2,7 @@ import numpy as np
 
 SINGLE_PLAYER_POSITION_OFFSET = 13
 
-stop = False
+
 class LudoState():
     def __init__(self,globes=True,stars=True):
         self.globes_enabled = globes
@@ -11,8 +11,6 @@ class LudoState():
 
 def generate_inputs(player_i,pieces,active_player_mask, dice_roll:int):
     
-    global stop
-
     opponent_players = __get_diff_position(player_i,pieces,active_player_mask)
     change_danger = __get_change_danger(opponent_players,dice_roll)
     goal_position = __get_goal_position(player_i,pieces,active_player_mask)   
@@ -79,7 +77,7 @@ def generate_inputs(player_i,pieces,active_player_mask, dice_roll:int):
     # input 8: normalized distance to goal
     i_8 = goal_position/59
 
-    I = np.hstack((i_0,i_1,i_2,i_3,i_4,i_5,i_6,i_7,i_8))
+    I = i_0,i_1,i_2,i_3,i_4,i_5,i_6,i_7,i_8
     return I
 
 def __get_diff_position(player_i,pieces,mask):
