@@ -5,12 +5,19 @@ import input_generator
 import matplotlib.pyplot as plt
 
 TRAIN = True
+PLAY = False
+
+
+# initialize genetic player
+genetic_player = GeneticPlayer()
 
 if TRAIN:
-    # initialize genetic player
-    genetic_player = GeneticPlayer()
-
+    # train genetic player
     genetic_player.train()
+
+elif PLAY:
+    # play with best member of population
+    genetic_player.play_with_best(1000)
 
 
 else:
@@ -21,6 +28,8 @@ else:
         there_is_a_winner = False
         while not there_is_a_winner:
             
+            player_with_highest_activation = -1
+            highest_activation = -100
             (dice, move_pieces, player_pieces, enemy_pieces, player_is_a_winner, there_is_a_winner), player_i = g.get_observation()
             '''
             print("Player: ", player_i,end=" ")
@@ -44,10 +53,26 @@ else:
                     # obtain the current sate of the pieces
                     pieces = g.get_pieces()
                     # obtain current state
-                    input_matrix = input_generator.generate_inputs(player_i,pieces,mask,dice)
+
+                    I = input_generator.generate_inputs(player_i,pieces,mask,dice)
+                    weights = genetic_player.get_weights_of_best_player()
+
+                    for idx,pieces in enumerate(move_pieces):
+                        input = I[:,pieces]
+                        activation = genetic_player.run_neural_networks(input,weights)
+                        if activation > highest_activation:
+                            highest_activation = activation
+                            player_with_highest_activation = idx
+
 
                     #piece_to_move = function call
-                    piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))] # to be replaced by function call
+                    if player_with_highest_activation == -1:
+                        # something went wrong
+                        print("Something went wrong with the neural network")
+                        piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))]
+                    else:
+                        # move the piece with the highest activation
+                        piece_to_move = move_pieces[player_with_highest_activation] 
 
                 elif len(move_pieces) == 1: # there is no choice for moving a piece
                     piece_to_move = move_pieces[0]

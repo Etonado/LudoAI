@@ -5,13 +5,14 @@ from multiprocessing import Pool
 import time
 
 
+
 NUMBER_OF_HIDDEN_NEURONS = 10
 NUMBER_OF_INPUTS = 9
 NUMBER_OF_WEIGHTS = NUMBER_OF_INPUTS * NUMBER_OF_HIDDEN_NEURONS + NUMBER_OF_HIDDEN_NEURONS
 BIT_LENGTH = 8
 GENE_LENGTH = BIT_LENGTH * NUMBER_OF_WEIGHTS
-MULTI_CORE = True # doesn't work because of different memory allocation
-NUMBER_OF_CORES = 4 # can't be changed atm
+MULTI_CORE = True 
+NUMBER_OF_CORES = 4 # can't be changed atm :/
 
 
 
@@ -19,7 +20,7 @@ class GeneticPlayer:
 
     global GENE_LENGTH, MULTI_CORE, NUMBER_OF_CORES
 
-    def __init__(self,population_size = 10, fitness_loops = 40, mutation_rate = 0.05, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
+    def __init__(self,population_size = 100, fitness_loops = 400, mutation_rate = 0.1, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
         self.variants = []
         self.population_size = population_size
         self.mutation_rate = mutation_rate
@@ -28,7 +29,8 @@ class GeneticPlayer:
         self.generation = 0
         self.elite_size = int(0.1*population_size)
         self.parent_size  = int(0.2*population_size)
-        self.tournament_size = 5
+        self.selection_type = selection_type
+        self.tournament_size = 4
         self.fitness_loops = fitness_loops
         self.game = ludopy.Game()
         self.__generate_initial_population()
@@ -43,6 +45,7 @@ class GeneticPlayer:
 
     def compute_fitness(self,process_idx,random_seed = None,players="random"):
         # fitness for all chromosomes in the current generation
+        chromosome_fitness = []
         # set random seed if given
         if random_seed:
             np.random.seed(random_seed)   
@@ -116,9 +119,14 @@ class GeneticPlayer:
         
             # fitness_loop amount of games have been played
             chromosome.fitness = winning_count/self.fitness_loops
+            chromosome_fitness.append(chromosome.fitness)
+
             if chromosome.fitness > max_fitness:
                 max_fitness = chromosome.fitness
             print("Fitness: ", chromosome.fitness," Generation: ", self.generation, " Max fitness: ",max_fitness)
+
+        if MULTI_CORE:
+            return chromosome_fitness
 
 
 
@@ -183,6 +191,17 @@ class GeneticPlayer:
         for chromosome in self.variants:
             sum += chromosome.fitness
         return sum/self.population_size
+    
+    def __mean_std_fitness(self):
+        fitness = []
+        for chromosome in self.variants:
+            fitness.append(chromosome.fitness)
+        
+        mean = np.mean(fitness)
+        std = np.std(fitness)
+
+        return mean,std
+
 
     def __call_fitness_function(self):
         if MULTI_CORE:
@@ -200,7 +219,12 @@ class GeneticPlayer:
             # def compute_fitness(self,process_idx = None,random_seed = None,players="random"):
             with Pool(processes=NUMBER_OF_CORES) as pool:
                 inputs = [(range_0,random_seed_0,"random"), (range_1,random_seed_1,"random"),(range_2,random_seed_2,"random"),(range_3,random_seed_3,"random")]
-                pool.starmap(self.compute_fitness, inputs)
+                chromosome_fitness_lists = pool.starmap(self.compute_fitness, inputs)
+                # flatten the list
+                chromosome_fitness = [item for sublist in chromosome_fitness_lists for item in sublist]
+                # set fitness of chromosomes
+                for idx,chromosomes in enumerate(self.variants):
+                    chromosomes.fitness = chromosome_fitness[idx]
         else:
             range = (0,self.population_size)
             self.compute_fitness(range)
@@ -222,9 +246,18 @@ class GeneticPlayer:
             # print lowest fitness of generation
             print("Generation: ", self.generation -1, " Min fitness: ", self.variants[self.population_size-1].fitness)
 
+            # save statistics
+            with open('./statistics/file1.txt', 'a') as file:
+                file.write("%d,%.2f,%.2f,%.2f\n" % (self.generation-1,self.variants[self.population_size-1].fitness,self.variants[0].fitness,self.__average_fitness()))
+
+            best_5 = []
+            for chromosome in self.variants[0:5]:
+                best_5.append(chromosome.genes)
+            best_5 = np.array(best_5)
+            np.savetxt("./weights/best_5_current_gen.txt",best_5, delimiter=',',fmt='%1.4f',newline="\n")
 
             # select parents
-            parents1,parents2 = self.__select_parents("tournament")
+            parents1,parents2 = self.__select_parents(self.selection_type)
             # extract elite chromosomes and delete rest of population
             self.variants = self.variants[0:self.elite_size]
             # create a list of children
@@ -252,6 +285,18 @@ class GeneticPlayer:
 
             self.generation += 1
 
+
+    def get_weights_of_best_player(self):
+        # open textfile to get genes of best player
+        with open('./weights/best_5_current_gen.txt', 'r') as file:
+            genes = np.loadtxt(file, delimiter=',', max_rows=1).astype(int)
+        
+                
+        winner = Chromosome(genes)
+       
+        weights = winner.decrypt_chromosome()
+
+        return weights
 
 
 
@@ -296,7 +341,7 @@ class Chromosome():
             if np.random.randint(0,100) < (mutation_rate * 100):
                 gene = np.random.randint(0, 1)
 
-    def decrypt_chromosome(self):
+    def decrypt_chromosome(self,genes = None):
         # decrypt the genes and return the weights for the neural network
         global BIT_LENGTH
         weights = []
@@ -308,3 +353,4 @@ class Chromosome():
                 weights.append((temp[0]+1)/(2**7)-1)
 
         return np.array(weights)
+    
