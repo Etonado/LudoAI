@@ -1,27 +1,34 @@
 import numpy as np
 import input_generator
 import ludopy
+from multiprocessing import Pool
+import time
 
-NUMBER_OF_HIDDEN_NEURONS = 5
+
+NUMBER_OF_HIDDEN_NEURONS = 10
 NUMBER_OF_INPUTS = 9
 NUMBER_OF_WEIGHTS = NUMBER_OF_INPUTS * NUMBER_OF_HIDDEN_NEURONS + NUMBER_OF_HIDDEN_NEURONS
 BIT_LENGTH = 8
 GENE_LENGTH = BIT_LENGTH * NUMBER_OF_WEIGHTS
+MULTI_CORE = True # doesn't work because of different memory allocation
+NUMBER_OF_CORES = 4 # can't be changed atm
 
 
 
 class GeneticPlayer:
 
-    global GENE_LENGTH
+    global GENE_LENGTH, MULTI_CORE, NUMBER_OF_CORES
 
-    def __init__(self,population_size = 100, fitness_loops = 100, mutation_rate = 0.05, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
+    def __init__(self,population_size = 10, fitness_loops = 40, mutation_rate = 0.05, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
         self.variants = []
         self.population_size = population_size
         self.mutation_rate = mutation_rate
         self.crossover_rate = crossover_rate
         self.selection_rate = selection_rate
-        self.selection_type = selection_type
         self.generation = 0
+        self.elite_size = int(0.1*population_size)
+        self.parent_size  = int(0.2*population_size)
+        self.tournament_size = 5
         self.fitness_loops = fitness_loops
         self.game = ludopy.Game()
         self.__generate_initial_population()
@@ -34,10 +41,14 @@ class GeneticPlayer:
     def __sort_population(self):
         self.variants.sort(key=lambda x: x.fitness, reverse=True)
 
-    def __compute_fitness(self,players="random"):
+    def compute_fitness(self,process_idx,random_seed = None,players="random"):
         # fitness for all chromosomes in the current generation
+        # set random seed if given
+        if random_seed:
+            np.random.seed(random_seed)   
+            
         max_fitness = 0
-        for chromosome in self.variants:
+        for chromosome in self.variants[process_idx[0]:process_idx[1]]:
             # every chromosome is tested for fitness_loops times
             weights = chromosome.decrypt_chromosome()
             winning_count = 0
@@ -67,7 +78,7 @@ class GeneticPlayer:
                             I = input_generator.generate_inputs(player_i,pieces,mask,dice)
                             for idx,pieces in enumerate(move_pieces):
                                 input = I[:,pieces]
-                                activation = self.__run_neural_networks(input,weights)
+                                activation = self.run_neural_networks(input,weights)
                                 if activation > highest_activation:
                                     highest_activation = activation
                                     player_with_highest_activation = idx
@@ -111,7 +122,7 @@ class GeneticPlayer:
 
 
 
-    def __run_neural_networks(self,input_matrix,weights,activation_function = "ReLU"):
+    def run_neural_networks(self,input_matrix,weights,activation_function = "ReLU"):
         global NUMBER_OF_HIDDEN_NEURONS, NUMBER_OF_INPUTS
 
         # reshape the input matrix to a 1 x Inputs matrix
@@ -137,18 +148,110 @@ class GeneticPlayer:
 
         return output
 
+    def __tournament_selection(self,k):
+        participants = []
+        # select k random chromosomes
+        for i in range(k):
+            participants.append(self.variants[np.random.randint(0, self.population_size)])
+
+        # return the chromosome with the highest fitness
+        participants.sort(key=lambda x: x.fitness, reverse=True)
+        return participants[0]
+
     
         
-    def __select_parents(self):
-        if self.selection_type == "tournament":
-            return self.__tournament_selection()
+    def __select_parents(self,selection_type):
+        # Create two lists of parents
+        parents1 = []
+        parents2 = []
+        # Select parents
+        if selection_type == "tournament":
+            for i in range(self.parent_size):
+                parents1.append(self.__tournament_selection(self.tournament_size))
+                parents2.append(self.__tournament_selection(self.tournament_size))
+            return parents1,parents2
+
+        
+        elif selection_type == "roulette_wheel":
+            self.__roulette_wheel_selection()   
+            return parents1,parents2
         else:
-            return self.__roulette_wheel_selection()    
+            raise Exception("Invalid selection type") 
+        
+    def __average_fitness(self):
+        sum = 0
+        for chromosome in self.variants:
+            sum += chromosome.fitness
+        return sum/self.population_size
+
+    def __call_fitness_function(self):
+        if MULTI_CORE:
+            # initialize random seeds
+            random_seed_0 = np.random.randint(0,10000000)
+            random_seed_1 = np.random.randint(0,10000000)
+            random_seed_2 = np.random.randint(0,10000000)
+            random_seed_3 = np.random.randint(0,10000000)
+            # split variants in 4 groups
+            range_0 = (0,int(self.population_size/4))
+            range_1 = (int(self.population_size/4),int(self.population_size/2))
+            range_2 = (int(self.population_size/2),int(3*self.population_size/4))
+            range_3 = (int(3*self.population_size/4),self.population_size)
+            # create processes
+            # def compute_fitness(self,process_idx = None,random_seed = None,players="random"):
+            with Pool(processes=NUMBER_OF_CORES) as pool:
+                inputs = [(range_0,random_seed_0,"random"), (range_1,random_seed_1,"random"),(range_2,random_seed_2,"random"),(range_3,random_seed_3,"random")]
+                pool.starmap(self.compute_fitness, inputs)
+        else:
+            range = (0,self.population_size)
+            self.compute_fitness(range)
 
     def train(self,generations = 100):
-        for i in range(generations):
-            self.__compute_fitness()
+        # compute fitness of initial population
+        time_start = time.time()
+        self.__call_fitness_function()
+        time_end = time.time()
+        print("Time to compute fitness of initial population: ", time_end-time_start)
+        self.generation = 1
+        while self.generation < generations:
+            # sort population
+            self.__sort_population()
+            # print average fitness of previous generation
+            print("Average fitness of generation ", self.generation-1,": ", self.__average_fitness())
+            # print max fitness of generation
+            print("Generation: ", self.generation -1, " Max fitness: ", self.variants[0].fitness)
+            # print lowest fitness of generation
+            print("Generation: ", self.generation -1, " Min fitness: ", self.variants[self.population_size-1].fitness)
+
+
+            # select parents
+            parents1,parents2 = self.__select_parents("tournament")
+            # extract elite chromosomes and delete rest of population
+            self.variants = self.variants[0:self.elite_size]
+            # create a list of children
+            children = []
+            # determine crossover method 
+            number_single_point_crossover = np.random.randint(1,(self.population_size-self.elite_size))
+            # single point crossover
+            for i in range(number_single_point_crossover):
+                children.append(parents1[np.random.randint(0,self.parent_size)].single_point_crossover(parents2[np.random.randint(0,self.parent_size)]))
+            # two point crossover
+            for i in range(self.population_size-self.elite_size-number_single_point_crossover):
+                children.append(parents1[np.random.randint(0,self.parent_size)].two_point_crossover(parents2[np.random.randint(0,self.parent_size)]))
+            # mutation
+            for child in children:
+                child.mutate(self.mutation_rate)
+            # add children to population
+            self.variants.extend(children)
+            # compute fitness of new population
+            time_start = time.time()
+            self.__call_fitness_function()
+            time_end = time.time()
+            print("Time to compute fitness: ", time_end-time_start)
+            # increase generation
+            # print average fitness of generation
+
             self.generation += 1
+
 
 
 
@@ -188,6 +291,7 @@ class Chromosome():
 
 
     def mutate(self,mutation_rate = 0.05):
+        
         for gene in self.genes:
             if np.random.randint(0,100) < (mutation_rate * 100):
                 gene = np.random.randint(0, 1)
