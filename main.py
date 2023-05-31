@@ -1,101 +1,107 @@
 import ludopy
 import numpy as np
-from genetic_learning import GeneticPlayer
-import input_generator
+from genetic_learning import GeneticPlayer, InputGenerator
 import matplotlib.pyplot as plt
+import Ditlev.agent as agent
+import Ditlev.multiplay as multiplay
+from Ditlev.multiplay import chooseAction
+import csv
 
-TRAIN = True
+
+
+
+def determine_number_of_games(winning_rate_list, expectation, range,show = False):
+    if show:
+        plt.figure()
+        plt.plot(winning_rate_list)
+        plt.ylabel('Winning rate')
+        plt.xlabel('Number of games')
+        axis = plt.gca()
+        #axis.set_ylim([0.2,0.3])
+        #axis.set_xlim([0,1000])
+        plt.show()
+
+    highest_bad_approximation = 0
+
+    for idx,elements in enumerate(winning_rate):
+        if elements < (expectation - range) or elements > (expectation + range):
+           highest_bad_approximation = idx
+
+    print("Highest bad approximation: ",highest_bad_approximation)
+
+TRAIN = False
 PLAY = False
+EVALUATE = False
+WEIGHTS = False
+
 
 
 # initialize genetic player
 genetic_player = GeneticPlayer()
+input_generator = InputGenerator()
+
+
 
 if TRAIN:
     # train genetic player
     genetic_player.train()
 
-elif PLAY:
+elif EVALUATE:
     # play with best member of population
-    genetic_player.play_with_best(1000)
+    genetic_player.evaluate_best(number_of_games = 1000)
 
 
-else:
+
+elif PLAY:
     # play with trained player
+    winning_rate = []
     g = ludopy.Game()
-    while True:
-        g.reset()
-        there_is_a_winner = False
-        while not there_is_a_winner:
-            
-            player_with_highest_activation = -1
-            highest_activation = -100
-            (dice, move_pieces, player_pieces, enemy_pieces, player_is_a_winner, there_is_a_winner), player_i = g.get_observation()
-            '''
-            print("Player: ", player_i,end=" ")
-            print("Move Pieces: ",move_pieces,end=" ")
-            print("Player Pieces ",player_pieces,end=" ")
-            print("enemy_pieces: ",enemy_pieces)
-
-            '''
-            
-            if player_i == 0:
-                # player to be trained
-                # set mask for all indices set in move_pieces
-                mask = np.zeros(4)
-                for x in move_pieces:
-                    mask[x] = 1
-
-                #print("\nPieces: ",g.get_pieces()[0])
-
-                # decision based on player state        
-                if len(move_pieces)>1:
-                    # obtain the current sate of the pieces
-                    pieces = g.get_pieces()
-                    # obtain current state
-
-                    I = input_generator.generate_inputs(player_i,pieces,mask,dice)
-                    weights = genetic_player.get_weights_of_best_player()
-
-                    for idx,pieces in enumerate(move_pieces):
-                        input = I[:,pieces]
-                        activation = genetic_player.run_neural_networks(input,weights)
-                        if activation > highest_activation:
-                            highest_activation = activation
-                            player_with_highest_activation = idx
+    for i in range(50):
+        games_played = 0
+        games_won = 0
+        while games_played < 300:
+            g.reset()
+            there_is_a_winner = False
+            games_played += 1
+            while not there_is_a_winner:
+                
+                (dice, move_pieces, player_pieces, enemy_pieces, player_is_a_winner, there_is_a_winner), player_i = g.get_observation()
 
 
-                    #piece_to_move = function call
-                    if player_with_highest_activation == -1:
-                        # something went wrong
-                        print("Something went wrong with the neural network")
+                if player_i == 0:
+                   piece_to_move = genetic_player.play_with_best(player_i,move_pieces,g.get_pieces(),dice)
+
+ 
+                else:
+                    # other players
+                    if len(move_pieces):
                         piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))]
                     else:
-                        # move the piece with the highest activation
-                        piece_to_move = move_pieces[player_with_highest_activation] 
-
-                elif len(move_pieces) == 1: # there is no choice for moving a piece
-                    piece_to_move = move_pieces[0]
-                else:   # no piece can be moved
-                    piece_to_move = -1
-
-            else:
-                # other players
-                if len(move_pieces):
-                    piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))]
-                else:
-                    piece_to_move = -1
+                        piece_to_move = -1
 
 
-            _, _, _, _, _, there_is_a_winner = g.answer_observation(piece_to_move)
+                _, _, _, _, _, there_is_a_winner = g.answer_observation(piece_to_move)
+
+            if player_i == 0:
+                games_won += 1
+
+        winning_rate.append(games_won/games_played)
+    print(winning_rate)
+    with open('./6n_rate.csv', 'w') as file:
+        writer = csv.writer(file)
+        writer.writerow(winning_rate)
 
 
-        print("Player: ", player_i," won")
+            
+elif WEIGHTS:
+    weights = genetic_player.get_weights_of_best_player()
+    weights = np.array(weights).astype(float)
+    weights = np.reshape(weights,(10,-1))
 
+    with open('./weights_best_6.csv', 'w') as file:
+        writer = csv.writer(file)
+        for lines in weights:
+            writer.writerow(lines)
 
-        '''
-        print("Saving history to numpy file")
-        g.save_hist("./history/game_history.npy")
-        print("Saving game video")
-        g.save_hist_video("./history/game_video.mp4")
-        '''
+else:
+    print("Please choose an action to be performed by setting the variables TRAIN, PLAY, EVALUATE or WEIGHTS to True")

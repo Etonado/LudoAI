@@ -7,10 +7,9 @@ import time
 
 NUMBER_OF_HIDDEN_NEURONS = 6
 NUMBER_OF_INPUTS = 9
-NUMBER_OF_WEIGHTS = NUMBER_OF_INPUTS * NUMBER_OF_HIDDEN_NEURONS + NUMBER_OF_HIDDEN_NEURONS
 BIT_LENGTH = 8
+NUMBER_OF_WEIGHTS = NUMBER_OF_INPUTS * NUMBER_OF_HIDDEN_NEURONS + NUMBER_OF_HIDDEN_NEURONS
 GENE_LENGTH = BIT_LENGTH * NUMBER_OF_WEIGHTS
-MULTI_CORE = True 
 NUMBER_OF_CORES = 4 # can't be changed atm :/
 SINGLE_PLAYER_POSITION_OFFSET = 13 # in game field number
 
@@ -18,17 +17,16 @@ SINGLE_PLAYER_POSITION_OFFSET = 13 # in game field number
 
 class GeneticPlayer:
 
-    global GENE_LENGTH, MULTI_CORE, NUMBER_OF_CORES
+    global GENE_LENGTH, NUMBER_OF_CORES
 
-    def __init__(self,population_size = 100, fitness_loops = 300, mutation_rate = 0.1, crossover_rate = 0.5, selection_rate = 0.5, selection_type = "tournament"):
+    def __init__(self,population_size = 100, fitness_loops = 300, mutation_rate = 0.1, elite_rate = 0.1, parent_rate = 0.3, selection_type = "tournament", multi_core_learning = True):
         self.variants = []
         self.population_size = population_size
         self.mutation_rate = mutation_rate
-        self.crossover_rate = crossover_rate
-        self.selection_rate = selection_rate
+        self.multi_core_learning = multi_core_learning
         self.generation = 0
-        self.elite_size = int(0.1*population_size)
-        self.parent_size  = int(0.3*population_size)
+        self.elite_size = int(elite_rate*population_size)
+        self.parent_size  = int(parent_rate*population_size)
         self.selection_type = selection_type
         self.tournament_size = 4
         self.fitness_loops = fitness_loops
@@ -126,7 +124,7 @@ class GeneticPlayer:
                 max_fitness = chromosome.fitness
             print("Fitness: ", chromosome.fitness," Generation: ", self.generation, " Max fitness: ",max_fitness)
 
-        if MULTI_CORE:
+        if self.multi_core_learning:
             return chromosome_fitness
 
 
@@ -205,7 +203,7 @@ class GeneticPlayer:
 
 
     def __call_fitness_function(self):
-        if MULTI_CORE:
+        if self.multi_core_learning:
             # initialize random seeds
             random_seed_0 = np.random.randint(0,10000000)
             random_seed_1 = np.random.randint(0,10000000)
@@ -290,8 +288,11 @@ class GeneticPlayer:
 
     def get_weights_of_best_player(self):
         # open textfile to get genes of best player
-        with open('./weights/best_current_gen.txt', 'r') as file:
-            genes = np.loadtxt(file, delimiter=',', max_rows=1).astype(int)
+        try:
+            with open('./weights/best_current_gen.txt', 'r') as file:
+                genes = np.loadtxt(file, delimiter=',', max_rows=1).astype(int)
+        except:
+            raise Exception("No best_current_gen.txt file found. Please evaluate the final players first.")
         
                 
         winner = Chromosome(genes)
@@ -305,9 +306,11 @@ class GeneticPlayer:
         
         best_winning_rate = 0
         best_winning_rate_index = -1
-
-        with open('./weights/best_5_current_gen.txt', 'r') as file:
-            best_genes = np.loadtxt(file, delimiter=',', max_rows=5).astype(int)
+        try:
+            with open('./weights/best_5_current_gen.txt', 'r') as file:
+                best_genes = np.loadtxt(file, delimiter=',', max_rows=5).astype(int)
+        except:
+            raise Exception("No best_5_current_gen.txt file found. Please train the model first.")
         
         best_variants = []
         for genes in best_genes:
@@ -397,32 +400,54 @@ class GeneticPlayer:
                 best_winning_rate_index = player_index
                 best_winning_rate = final_winning_rate
 
-        np.savetxt("./weights/best_current_gen.txt",best_variants[best_winning_rate_index].genes, delimiter=',',fmt='%1.4f',newline = ",")
+        best = []
+        best.append(best_variants[best_winning_rate_index].genes)
+        best = np.array(best)
+        np.savetxt("./weights/best_current_gen.txt",best, delimiter=',',fmt='%1.4f',newline="\n")
 
+  
 
-
-    def play_with_best(self,player_i,move_pieces,pieces,mask,dice):
+    def play_with_best(self,player_i,move_pieces,pieces,dice):
         # init
         player_with_highest_activation = -1
         highest_activation = -1000
 
-        I = self.input_generator.generate_inputs(player_i,pieces,mask,dice)
-        weights = self.get_weights_of_best_player()
+        mask = np.zeros(4)
+        for x in move_pieces:
+            mask[x] = 1
 
-        for idx,pieces in enumerate(move_pieces):
-            input = I[:,pieces]
-            activation = self.run_neural_networks(input,weights)
-            if activation > highest_activation:
-                highest_activation = activation
-                player_with_highest_activation = idx
 
-        #piece_to_move = function call
-        if player_with_highest_activation == -1:
-            # something went wrong
-            raise Exception("Something went wrong with the neural network")
-        else:
-            # move the piece with the highest activation
-            return player_with_highest_activation
+        if len(move_pieces)>1:
+            # obtain the current sate of the pieces
+            # obtain current state
+
+            I = self.input_generator.generate_inputs(player_i,pieces,mask,dice)
+            weights = self.get_weights_of_best_player()
+
+            for idx,pieces in enumerate(move_pieces):
+                input = I[:,pieces]
+                activation = self.run_neural_networks(input,weights)
+                if activation > highest_activation:
+                    highest_activation = activation
+                    player_with_highest_activation = idx
+
+
+            #piece_to_move = function call
+            if player_with_highest_activation == -1:
+                # something went wrong
+                print("Something went wrong with the neural network")
+                piece_to_move = move_pieces[np.random.randint(0, len(move_pieces))]
+            else:
+                # move the piece with the highest activation
+                piece_to_move = move_pieces[player_with_highest_activation] 
+
+        elif len(move_pieces) == 1: # there is no choice for moving a piece
+            piece_to_move = move_pieces[0]
+        else:   # no piece can be moved
+            piece_to_move = -1
+
+        return piece_to_move
+
 
 
 class Chromosome():
